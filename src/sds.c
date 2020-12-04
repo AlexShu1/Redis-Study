@@ -41,6 +41,7 @@
 
 const char *SDS_NOINIT = "SDS_NOINIT";
 
+// 根据不同的类型返回struct的长度
 static inline int sdsHdrSize(char type) {
     switch(type&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -73,6 +74,8 @@ static inline char sdsReqType(size_t string_size) {
 #endif
 }
 
+// 下面的方法，为上面的init 里面用到的工具方法
+// 根据不同的string size 返回不同sds类型
 static inline size_t sdsTypeMaxSize(char type) {
     if (type == SDS_TYPE_5)
         return (1<<5) - 1;
@@ -80,6 +83,7 @@ static inline size_t sdsTypeMaxSize(char type) {
         return (1<<8) - 1;
     if (type == SDS_TYPE_16)
         return (1<<16) - 1;
+    //这里应该是考虑到32位系统的原因
 #if (LONG_MAX == LLONG_MAX)
     if (type == SDS_TYPE_32)
         return (1ll<<32) - 1;
@@ -116,17 +120,27 @@ sds sdsnewlen(const void *init, size_t initlen) {
     if (type == SDS_TYPE_5 && initlen == 0) type = SDS_TYPE_8;
     //获取struct的长度
     int hdrlen = sdsHdrSize(type);
+     // flag 指针，这个指针就是用来表示sds 是哪个类型的
     unsigned char *fp; /* flags pointer. */
     size_t usable;
 
+     //分配空间 这里+1 为的是分配一个结束符号(结构长度 + 字符串长度)
     sh = s_malloc_usable(hdrlen+initlen+1, &usable);
+     // sh在这里指向了这个刚刚分配的内存地址
     if (sh == NULL) return NULL;
+     // 判断是否是init阶段
     if (init==SDS_NOINIT)
         init = NULL;
     else if (!init)
+        // 如果不是init阶段则清0
+        //init 不为空的话
+        // 将sh这块内存全部设置为0
         memset(sh, 0, hdrlen+initlen+1);
+     //s 指向了字符串开始的地址(hdrlen: 结构的长度, 可以看作字符串的开始位置)
     s = (char*)sh+hdrlen;
+    // flags位置：刚好是字符串的前一位
     fp = ((unsigned char*)s)-1;
+    // 可用大小=可用大小-struct-flags
     usable = usable-hdrlen-1;
     if (usable > sdsTypeMaxSize(type))
         usable = sdsTypeMaxSize(type);
@@ -164,8 +178,11 @@ sds sdsnewlen(const void *init, size_t initlen) {
             break;
         }
     }
+     //如果两者都不为空，则init 这个对应的字符串，赋值给s
     if (initlen && init)
+        // //这里是给buf赋值初始化
         memcpy(s, init, initlen);
+     // 分配一个结束符
     s[initlen] = '\0';
     return s;
 }
@@ -227,19 +244,26 @@ void sdsclear(sds s) {
  *
  * Note: this does not change the *length* of the sds string as returned
  * by sdslen(), but only the free buffer space we have. */
+// 扩容sds， 这里有一点，如果sds本身还有剩余空间，那么多分配的空间等于 addlen-leftlen
 sds sdsMakeRoomFor(sds s, size_t addlen) {
     void *sh, *newsh;
+    //获取剩余可用的空间
     size_t avail = sdsavail(s);
     size_t len, newlen;
+    //在上面图解里面s的指针是这段空间的中间 ,那么-1就正好指向了flag
     char type, oldtype = s[-1] & SDS_TYPE_MASK;
     int hdrlen;
     size_t usable;
 
     /* Return ASAP if there is enough space left. */
+    //如果可用空间大于需要增加的长度，那么直接返回
     if (avail >= addlen) return s;
 
+    //len 已使用长度
     len = sdslen(s);
+    //sh 回到指向了这个sds的起始位置。
     sh = (char*)s-sdsHdrSize(oldtype);
+    // newlen 代表最小需要的长度
     newlen = (len+addlen);
     if (newlen < SDS_MAX_PREALLOC)
         // 如果需要开辟的空间<1MB的时候, 扩展的新空间大小直接翻倍
@@ -248,6 +272,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
         // 开辟的空间>=1MB的时候, 扩展的新空间只会多增加1MB
         newlen += SDS_MAX_PREALLOC;
 
+    //获取新长度的类型
     type = sdsReqType(newlen);
 
     /* Don't use type 5: the user is appending to the string and type 5 is
@@ -257,24 +282,42 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
 
     hdrlen = sdsHdrSize(type);
     if (oldtype==type) {
+        //sh是开始地址，在开始地址的基础上，分配更多的空间，
+        // 逻辑如同初始化部分，hdrlen 是head的长度，即struct本身大小
+        // 后面newlen 是buf 大小， +1 是为了结束符号
+        // sds 通常情况下是可以直接打印的
         newsh = s_realloc_usable(sh, hdrlen+newlen+1, &usable);
         if (newsh == NULL) return NULL;
+        //s继续指向中间位置
         s = (char*)newsh+hdrlen;
     } else {
         /* Since the header size changes, need to move the string forward,
          * and can't use realloc */
+        //如果类型发生变化，地址内容不可复用，所以找新的空间。
         newsh = s_malloc_usable(hdrlen+newlen+1, &usable);
         if (newsh == NULL) return NULL;
+        //复制原来的str到新的sds 上面,
+        //newsh+hdrlen 等于sds buf 地址开始的位置
+        //s 原buf的位置
+        //len+1 把结束符号也复制进来
         memcpy((char*)newsh+hdrlen, s, len+1);
+        //释放前面的内存空间
         s_free(sh);
+        //调整s开始的位置，即地址空间指向新的buf开始的位置
         s = (char*)newsh+hdrlen;
+        //-1 正好到了flag的位置
         s[-1] = type;
+        //分配len的值
         sdssetlen(s, len);
     }
+    //usable：现在字符串的可用长度;
     usable = usable-hdrlen-1;
+    // 若当前的字符串长度, 大于了限制; 则使用新的SDS's type.
     if (usable > sdsTypeMaxSize(type))
         usable = sdsTypeMaxSize(type);
+    //分配alloc的值
     sdssetalloc(s, usable);
+    //返回新的sds
     return s;
 }
 
@@ -328,6 +371,7 @@ sds sdsRemoveFreeSpace(sds s) {
  * 3) The free buffer at the end if any.
  * 4) The implicit null term.
  */
+// 获取alloc的长度
 size_t sdsAllocSize(sds s) {
     size_t alloc = sdsalloc(s);
     return sdsHdrSize(s[-1])+alloc+1;

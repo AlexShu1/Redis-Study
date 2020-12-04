@@ -108,6 +108,7 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+// 获取当前sds,可用的长度。
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -134,6 +135,7 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+// 给len 设值
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -201,6 +203,7 @@ static inline size_t sdsalloc(const sds s) {
     return 0;
 }
 
+// 给 alloc 设值
 static inline void sdssetalloc(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
